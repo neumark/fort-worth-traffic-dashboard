@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Recent traffic accidents in Fort Worth, TX</title>
+    <meta
+      name="viewport"
+      content="initial-scale=1,maximum-scale=1,user-scalable=no"
+    />
+  </head>
+  <body>
+    <script>
+      /* The Splitgraph query function is based on
+         https://observablehq.com/@splitgraph/ddn */
+      const query = async function (query) {
+        const options = {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ sql: query }),
+        };
+        // The query is submitted as an HTTP POST request. Since this is
+        // a public repository, no authentication is required.
+        const json = await (
+          await fetch("https://data.splitgraph.com/sql/query/ddn", options)
+        ).json();
+        if (json.error) {
+          throw new Error(json.error.replace(/^error: /, ""));
+        }
+        const objMap = (fn, input) =>
+          Object.fromEntries(Object.entries(input).map(fn));
+        const columns = Object.fromEntries(
+          json.fields.map(({ name, formattedType }) => [name, formattedType])
+        );
+        // the "fields" field of the response JSON has type information for
+        // each column of the result set. Based on this, some types which
+        // become strings "on the wire" can be cast to more suitable
+        // JS types.
+        const toValue = (type, value) => {
+          switch (type) {
+            case "DATE":
+              return new Date(value);
+            case "NUMERIC":
+              return parseFloat(value);
+            case "INT8":
+              return parseInt(value, 10);
+            default:
+              return value;
+          }
+        };
+        const convert = (data) =>
+          objMap(([col, val]) => [col, toValue(columns[col], val)], data);
+        return json.rows.map(convert);
+      };
+
+      // See the repo page at: https://www.splitgraph.com/fortworthtexas-gov/vehicle-accident-data-kr8h-9zxd
+      accidents = query(`
+        SELECT
+            "longitude",
+            "latitude",
+            "address",
+            "description",
+            "updatetime"
+        FROM
+            "fortworthtexas-gov/current-traffic-accidents-eax3-qev8:latest"."current_traffic_accidents"
+        ORDER by "updatetime" DESC
+        LIMIT 99`).then(console.log);
+    </script>
+  </body>
+</html>

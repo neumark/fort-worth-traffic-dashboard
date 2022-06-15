@@ -7,8 +7,35 @@
       name="viewport"
       content="initial-scale=1,maximum-scale=1,user-scalable=no"
     />
+    <link
+      href="https://api.mapbox.com/mapbox-gl-js/v2.8.2/mapbox-gl.css"
+      rel="stylesheet"
+    />
+    <script src="https://api.mapbox.com/mapbox-gl-js/v2.8.2/mapbox-gl.js"></script>
+    <style>
+      body {
+        margin: 0;
+        padding: 0;
+      }
+      #map {
+        position: absolute;
+        top: 0;
+        bottom: 0;
+        width: 100%;
+      }
+      .marker {
+        background-image: url("https://media.istockphoto.com/photos/two-men-reporting-a-car-crash-for-insurance-claim-picture-id1047083324?k=20&m=1047083324&s=612x612&w=0&h=9IzL_PH9xNK5TliK-touOVFfSmxgLwNR04XLxKHHmx0=");
+        background-size: cover;
+        width: 50px;
+        height: 50px;
+        border-radius: 50%;
+        cursor: pointer;
+      }
+    </style>
   </head>
   <body>
+    <div id="map"></div>
+
     <script>
       /* The Splitgraph query function is based on
          https://observablehq.com/@splitgraph/ddn */
@@ -54,18 +81,101 @@
         return json.rows.map(convert);
       };
 
-      // See the repo page at: https://www.splitgraph.com/fortworthtexas-gov/vehicle-accident-data-kr8h-9zxd
-      accidents = query(`
-        SELECT
-            "longitude",
-            "latitude",
-            "address",
-            "description",
-            "updatetime"
-        FROM
-            "fortworthtexas-gov/current-traffic-accidents-eax3-qev8:latest"."current_traffic_accidents"
-        ORDER by "updatetime" DESC
-        LIMIT 99`).then(console.log);
+      // TO MAKE THE MAP APPEAR YOU MUST
+      // ADD YOUR ACCESS TOKEN FROM
+      // https://account.mapbox.com
+      mapboxgl.accessToken =
+        "pk.eyJ1IjoicGV0ZXJuZXVtYXJrIiwiYSI6ImNsNDg3cDRmbjAwY2EzYnJ3c2J2cGw0NW8ifQ.3XF-Xh1c-eDSpGJTY8T8bA";
+      const map = new mapboxgl.Map({
+        style: "mapbox://styles/mapbox/streets-v11",
+        center: [-97.3, 32.7], // longitude, latitude coordinates of Fort Worth.
+        zoom: 12,
+        pitch: 45,
+        bearing: -17.6,
+        container: "map",
+        antialias: true,
+      });
+
+      let accidents = [];
+
+      // map.on() can be used to register a callback function to be executed when
+      // the map loads. In our case, the callback queries Splitgraph for
+      // accident data and then adds the markers to the map.
+      map.on("load", async () => {
+        accidents = await query(`
+            SELECT
+                "longitude",
+                "latitude",
+                "address",
+                "description",
+                "updatetime"
+            FROM
+                "fortworthtexas-gov/current-traffic-accidents-eax3-qev8:latest"."current_traffic_accidents"
+            ORDER by "updatetime" DESC
+            LIMIT 100`);
+        
+        const layers = map.getStyle().layers;
+        const labelLayerId = layers.find(
+          (layer) => layer.type === "symbol" && layer.layout["text-field"]
+        ).id;
+
+        // For the official 'building' layer example by Mapbox, see:
+        // https://docs.mapbox.com/mapbox-gl-js/example/3d-buildings/
+        map.addLayer(
+          {
+            id: "add-3d-buildings",
+            source: "composite",
+            "source-layer": "building",
+            filter: ["==", "extrude", "true"],
+            type: "fill-extrusion",
+            minzoom: 15,
+            paint: {
+              "fill-extrusion-color": "#aaa",
+
+              // Use an 'interpolate' expression to
+              // add a smooth transition effect to
+              // the buildings as the user zooms in.
+              "fill-extrusion-height": [
+                "interpolate",
+                ["linear"],
+                ["zoom"],
+                15,
+                0,
+                15.05,
+                ["get", "height"],
+              ],
+              "fill-extrusion-base": [
+                "interpolate",
+                ["linear"],
+                ["zoom"],
+                15,
+                0,
+                15.05,
+                ["get", "min_height"],
+              ],
+              "fill-extrusion-opacity": 0.6,
+            },
+          },
+          labelLayerId
+        );
+
+       
+        // create markers for each accident
+        accidents.forEach(
+          ({ longitude, latitude}) => {
+
+            // create DOM element for the marker
+            const el = document.createElement("div");
+            el.className = "marker";
+
+            // create the marker
+            new mapboxgl.Marker(el)
+              .setLngLat([longitude, latitude])
+              .addTo(map);
+          }
+        );
+      });
+
     </script>
   </body>
 </html>

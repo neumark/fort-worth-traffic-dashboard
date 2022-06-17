@@ -46,7 +46,9 @@
         padding: 10px;
         margin-bottom: 10px;
       }
-
+      .mapboxgl-popup {
+        max-width: 200px;
+      }
     </style>
   </head>
   <body>
@@ -129,6 +131,25 @@
         });
       };
 
+      // The `current_traffic_accidents` table only includes accidents which haven't been resolved
+      // yet. To get historic acciden data, the `vehicle_accident_data` table must be queried.
+      // See repo page: https://www.splitgraph.com/fortworthtexas-gov/vehicle-accident-data-kr8h-9zxd
+      const getAccidentCountInArea = async (longitude, latitude) => query(`
+        SELECT
+          count(0) as total,
+          MAX(crashdatetime) as latest,
+          MIN(crashdatetime) as earliest
+        FROM (
+          SELECT
+            "crashdatetime",
+            cast("location_1"->>'latitude' as double precision) as latitude,
+            cast("location_1"->>'longitude' as double precision) as longitude
+          FROM
+            "fortworthtexas-gov/vehicle-accident-data-kr8h-9zxd:latest"."vehicle_accident_data"
+        ) t
+        WHERE
+          ABS(t.latitude - ${latitude}) < 0.01 AND
+          ABS(t.longitude - ${longitude}) < 0.01`)
 
       // map.on() can be used to register a callback function to be executed when
       // the map loads. In our case, the callback queries Splitgraph for
@@ -212,7 +233,21 @@
        
         // create markers for each accident
         accidents.forEach(
-          ({ longitude, latitude}) => {
+          ({ updatetime, longitude, latitude, address, description }, ix) => {
+            // create the popup
+            const popup = new mapboxgl.Popup({ offset: 25 }).setHTML(`
+              ${description} at ${address}
+              <div id="popup${ix}"></div>
+            `);
+            popup.on('open', async () => {
+              const [{total, latest, earliest}] = await getAccidentCountInArea(longitude, latitude);
+              // The link to the query editor below was generated using the "Share" button in the
+              // query editor.
+              document.getElementById(`popup${ix}`).innerHTML = `
+              ${total} accidents in nearby area (${earliest.toISOString().split('T')[0]} to ${latest.toISOString().split('T')[0]})<br />
+              <a href="https://www.splitgraph.com/workspace/ddn?layout=hsplit&query=SELECT%0A++t.*%0AFROM+%28%0A++SELECT+%0A++++%22crashdatetime%22%2C%0A++++%22streetname%22%2C%0A++++%22fatality%22%2C+--+Did+a+fatality+occur%3F%0A++++%22hitandrun%22%2C+--+Was+the+incident+a+hit+and+run%3F%0A++++cast%28%22location_1%22-%3E%3E%27latitude%27+as+double+precision%29+as+latitude%2C%0A++++cast%28%22location_1%22-%3E%3E%27longitude%27+as+double+precision%29+as+longitude%0A++FROM%0A++++%22fortworthtexas-gov%2Fvehicle-accident-data-kr8h-9zxd%3Alatest%22.%22vehicle_accident_data%22%0A%29+t%0AWHERE%0A++ABS%28t.latitude+-+${latitude}%29+%3C+0.01+AND%0A++ABS%28t.longitude+-+${longitude}%29+%3C+0.01%0AORDER+by+crashdatetime+DESC">Query these accidents on Splitgraph</a>
+              `
+            });
 
             // create DOM element for the marker
             const el = document.createElement("div");
@@ -221,6 +256,7 @@
             // create the marker
             new mapboxgl.Marker(el)
               .setLngLat([longitude, latitude])
+              .setPopup(popup) // sets a popup on this marker
               .addTo(map);
           }
         );
